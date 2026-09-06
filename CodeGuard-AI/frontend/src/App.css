@@ -1,0 +1,84 @@
+@import "./components/buttons.css";
+@import "./components/Badge.css";
+
+.app {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.app-header {
+  border-bottom: 1px solid var(--border-soft);
+  background: rgba(13, 15, 20, 0.85);
+  backdrop-filter: blur(6px);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.app-header-inner {
+  max-width: 1000px;
+  margin: 0 auto;
+  padding: 14px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.brand-mark {
+  color: var(--accent);
+  font-size: 16px;
+}
+
+.brand-name {
+  font-weight: 700;
+  font-size: 15px;
+  letter-spacing: -0.01em;
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.capability-pills {
+  display: flex;
+  gap: 8px;
+}
+
+.pill {
+  font-size: 11px;
+  font-family: var(--font-mono);
+  padding: 3px 9px;
+  border-radius: 100px;
+  font-weight: 600;
+  border: 1px solid var(--border);
+}
+
+.pill-on {
+  color: var(--success);
+  border-color: rgba(61, 214, 140, 0.3);
+  background: var(--success-dim);
+}
+
+.pill-off {
+  color: var(--text-faint);
+  background: var(--panel);
+}
+
+.btn-sm {
+  padding: 6px 12px;
+  font-size: 12px;
+}
+
+.app-main {
+  flex: 1;
+  padding-top: 8px;
+}

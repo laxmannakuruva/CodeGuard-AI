@@ -1,0 +1,92 @@
+:root {
+  /* --- Palette ---
+     Deep charcoal-blue base rather than pure black or the common warm-cream
+     default. Blue accent reads as "trust / verification" for a code-audit
+     tool. Severity colors are functional (map to real data), not decorative.
+     AI-sourced findings get a distinct violet so the origin of a finding
+     (tool vs model) is always visually legible at a glance. */
+  --bg: #0d0f14;
+  --panel: #151823;
+  --panel-raised: #1b1f2e;
+  --border: #262b3d;
+  --border-soft: #1e2230;
+
+  --text: #e7e9f0;
+  --text-muted: #8991a8;
+  --text-faint: #5b6178;
+
+  --accent: #5b8def;
+  --accent-dim: #2f4676;
+  --accent-glow: rgba(91, 141, 239, 0.15);
+
+  --success: #3dd68c;
+  --success-dim: rgba(61, 214, 140, 0.12);
+  --danger: #f2545b;
+  --danger-dim: rgba(242, 84, 91, 0.12);
+  --warning: #f2a94e;
+  --warning-dim: rgba(242, 169, 78, 0.12);
+  --muted-sev: #8991a8;
+
+  --ai: #b48eff;
+  --ai-dim: rgba(180, 142, 255, 0.12);
+
+  --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+
+  --radius: 8px;
+  --radius-sm: 5px;
+}
+
+* { box-sizing: border-box; }
+
+html, body, #root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-ui);
+  -webkit-font-smoothing: antialiased;
+}
+
+code, pre, .mono {
+  font-family: var(--font-mono);
+}
+
+button {
+  font-family: inherit;
+}
+
+::selection {
+  background: var(--accent-dim);
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 5px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-faint);
+}
