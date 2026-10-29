@@ -1,0 +1,34 @@
+{% for ch in ctx.chapters %}
+<section class="page chapter" id="anchor-chapter-{{ loop.index }}">
+  <h1 class="chapter-title">{{ ch.heading }}</h1>
+  {% if ch.blocks %}
+    {% for block in ch.blocks %}
+      {% if block.type == "h2" %}
+        <h2 class="subheading" style="font-size:14pt;font-weight:700;margin:14px 0 8px 0;">{{ block.text }}</h2>
+      {% elif block.type == "p" %}
+        <p style="margin:0 0 10px 0;line-height:1.55;text-align:justify;">{{ block.text }}</p>
+      {% elif block.type == "ol" %}
+        <ol style="margin:8px 0 16px 32px;padding-left:20px;list-style-type:decimal;list-style-position:outside;">
+          {% for item in block.items %}<li style="display:list-item;margin-bottom:6px;line-height:1.5;">{{ item }}</li>{% endfor %}
+        </ol>
+      {% elif block.type == "ul" %}
+        <ul style="margin:8px 0 16px 32px;padding-left:20px;list-style-type:disc;list-style-position:outside;">
+          {% for item in block.items %}<li style="display:list-item;margin-bottom:6px;line-height:1.5;">{{ item }}</li>{% endfor %}
+        </ul>
+      {% elif block.type == "table" %}
+        <table style="border-collapse:collapse;width:100%;margin:14px 0;page-break-inside:avoid;">
+          <thead><tr>{% for c in block.items[0] %}<th style="border:1px solid #333;padding:6px 10px;background:#eee;font-weight:700;text-align:left;">{{ c }}</th>{% endfor %}</tr></thead>
+          <tbody>{% for row in block.items[1:] %}<tr>{% for c in row %}<td style="border:1px solid #333;padding:6px 10px;text-align:left;vertical-align:top;">{{ c }}</td>{% endfor %}</tr>{% endfor %}</tbody>
+        </table>
+      {% elif block.type == "figure" %}
+        <figure style="margin:18px 0;text-align:center;page-break-inside:avoid;">
+          {% if block.image_uri %}<img src="{{ block.image_uri }}" style="max-width:100%;height:auto;display:block;margin:0 auto;">{% endif %}
+          <figcaption style="font-size:11pt;font-style:italic;margin-top:8px;">{{ block.text }}</figcaption>
+        </figure>
+      {% endif %}
+    {% endfor %}
+  {% else %}
+    <p class="notice">No content detected.</p>
+  {% endif %}
+</section>
+{% endfor %}

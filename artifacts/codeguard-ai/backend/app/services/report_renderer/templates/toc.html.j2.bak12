@@ -1,0 +1,8 @@
+﻿<section class="page toc" id="anchor-toc">
+  <h1 style="font-size:22pt;font-weight:700;margin:0 0 8px 0;">Table of Contents</h1>
+  <div style="border-top:3px solid #222;margin:0 0 24px 0;"></div>
+  {% for ch in ctx.chapters %}
+  <div class="tocx-row"><a href="#anchor-chapter-{{ loop.index }}">{{ ch.heading }}</a></div>
+  {% endfor %}
+  <div class="tocx-row"><a href="#anchor-references">{{ ctx.chapters|length + 1 }}. References</a></div>
+</section>

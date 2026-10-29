@@ -1,0 +1,426 @@
+"""Report generation entry point (WeasyPrint)."""
+
+import logging
+import re
+from pathlib import Path
+
+from .design import extract_design, tokens_to_css_vars
+from .content import build_context, Section, _parse_blocks, Block
+from .pdf_structure import extract_structure
+from .images import select_project_images, ReportImage
+from .template import render_report_html
+from .exceptions import ReportRenderError
+
+log = logging.getLogger(__name__)
+TOC_RE = re.compile(r'data-toc-anchor="([^"]+)"')
+
+
+def _css_body():
+    return (Path(__file__).parent / "styles" / "report.css").read_text(encoding="utf-8")
+
+
+def _inject(html, pages):
+    # DISABLED - two-pass was creating garbage pages
+    return html
+
+
+def _render_pdf(html: str) -> bytes:
+    from weasyprint import HTML
+    return HTML(string=html).write_pdf()
+
+
+def _measure_pages_from_pdf(pdf_bytes, chapters):
+    """Search rendered PDF for chapter headings. Skip first 4 pages (cover, ack, toc)."""
+    import fitz
+
+    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    total = len(doc)
+    SKIP = 4
+    result = {}
+    try:
+        for i, ch in enumerate(chapters, 1):
+            found = None
+            for pn in range(SKIP, total):
+                if doc[pn].search_for(ch.heading):
+                    found = pn + 1
+                    break
+            result[f"anchor-chapter-{i}"] = found or (SKIP + i)
+
+        for anchor, text in [
+            ("anchor-ack", "Acknowledgement"),
+            ("anchor-gallery", "Project Image Gallery"),
+            ("anchor-appendices", "Appendices"),
+            ("anchor-references", "References"),
+        ]:
+            found = None
+            for pn in range(1, total):
+                if doc[pn].search_for(text):
+                    found = pn + 1
+                    break
+            result[anchor] = found or 1
+    finally:
+        doc.close()
+    return result
+
+
+def _uploaded_to_report_images(uploaded):
+    import base64
+    from pathlib import Path
+    out = []
+    for img in uploaded or []:
+        data = img.get("data") if isinstance(img, dict) else None
+        if not data:
+            continue
+        mime = (img.get("content_type") if isinstance(img, dict) else None) or "image/png"
+        uri = f"data:{mime};base64,{base64.b64encode(data).decode('ascii')}"
+        name = (img.get("filename") if isinstance(img, dict) else None) or "image"
+        caption = Path(name).stem.replace("_", " ").replace("-", " ").capitalize()
+        out.append(ReportImage(uri, caption, name))
+    return out
+
+
+import hashlib
+import json as _json
+
+
+def _get_problem_statement(profile, project_root):
+    import json as _j
+    from pathlib import Path as _P
+    for k in ("problem_statement", "problem", "problemStatement"):
+        v = profile.get(k) if isinstance(profile, dict) else getattr(profile, k, None)
+        if isinstance(v, str) and v.strip():
+            return v.strip()[:600]
+        if isinstance(v, dict) and str(v.get("text", "")).strip():
+            return str(v["text"]).strip()[:600]
+    if not project_root:
+        return ""
+    root = _P(project_root)
+    files = []
+    for base in (root, root.parent):
+        try:
+            files += [f for f in base.glob("*problem*") if f.is_file()]
+        except Exception:
+            pass
+    try:
+        files += [f for f in root.glob("*/*problem*") if f.is_file()]
+    except Exception:
+        pass
+    for f in files:
+        try:
+            raw = f.read_text(encoding="utf-8-sig", errors="ignore").strip()
+            if f.suffix.lower() == ".json":
+                d = _j.loads(raw)
+                if isinstance(d, dict):
+                    raw = str(d.get("text") or d.get("problem_statement") or d.get("problem") or "").strip()
+            if raw:
+                return raw[:600]
+        except Exception:
+            continue
+    try:
+        for f in root.glob("*.json"):
+            d = _j.loads(f.read_text(encoding="utf-8-sig", errors="ignore"))
+            if isinstance(d, dict):
+                v = d.get("problem_statement") or d.get("problem")
+                if isinstance(v, dict):
+                    v = v.get("text")
+                if isinstance(v, str) and v.strip():
+                    return v.strip()[:600]
+    except Exception:
+        pass
+    return ""
+
+
+def _sample_sig(sample_pdf):
+    try:
+        if isinstance(sample_pdf, (bytes, bytearray)):
+            return hashlib.sha256(bytes(sample_pdf)).hexdigest()[:8]
+        return hashlib.sha256(str(sample_pdf).encode()).hexdigest()[:8]
+    except Exception:
+        return "x"
+
+
+def _cache_key(sections, extra=""):
+    data = _json.dumps(
+        [{"id": getattr(s, "id", ""), "title": getattr(s, "title", ""),
+          "content": getattr(s, "content", "")} for s in sections],
+        sort_keys=True, default=str,
+    )
+    return hashlib.sha256((data + extra).encode()).hexdigest()[:16]
+
+
+def _load_cache(project_root, key):
+    if not project_root:
+        return None
+    f = Path(__file__).parent / ".ai_cache" / f"{key}.json"
+    if f.exists():
+        try:
+            return _json.loads(f.read_text(encoding="utf-8"))
+        except Exception:
+            return None
+    return None
+
+
+def _save_cache(project_root, key, sections):
+    if not project_root:
+        return
+    try:
+        d = Path(__file__).parent / ".ai_cache"
+        d.mkdir(exist_ok=True, parents=True)
+        (d / f"{key}.json").write_text(_json.dumps(sections), encoding="utf-8")
+    except Exception:
+        pass
+
+
+def _facts_from_context(ctx):
+    return {k: ctx.get(k, "" if not isinstance(ctx.get(k), list) else []) for k in [
+        "project_name", "project_type", "languages", "frameworks", "libraries",
+        "frontend", "backend", "database", "apis", "modules", "features",
+        "entry_points", "tests", "important_files", "folder_structure", "readme_summary",
+    ]}
+
+
+
+
+def _normalize_ai_tables(text):
+    """Convert AI's '<table>['a','b']['c','d']</table>' into markdown."""
+    import re as _re
+    def repl(m):
+        inner = m.group(1)
+        rows = _re.findall(r"\[([^\]]+)\]", inner)
+        if not rows:
+            return ""
+        out = []
+        for i, row in enumerate(rows):
+            cells = [c.strip().strip("'\"") for c in row.split(",")]
+            if not cells:
+                continue
+            out.append("| " + " | ".join(cells) + " |")
+            if i == 0:
+                out.append("|" + "---|" * len(cells))
+        return "\n".join(out)
+
+    text = _re.sub(r"<table>(.*?)</table>", repl, text, flags=_re.DOTALL)
+    # Also strip any stray <table> / </table> tags
+    text = text.replace("<table>", "").replace("</table>", "")
+    return text
+
+
+
+
+def _final_clean(blocks):
+    """Strip ## from headings, drop HTML table tags, remove heading dup from paragraphs."""
+    import re as _re
+    out = []
+    last_h2 = None
+    for b in blocks:
+        t = b.text or ""
+        if b.type == "h2":
+            b.text = _re.sub(r"^#+\\s*", "", t).strip()
+            if b.text:
+                last_h2 = b.text
+                out.append(b)
+            continue
+        if b.type == "p":
+            t = _re.sub(r"^#+\\s*", "", t)
+            t = _re.sub(r"<table[^>]*>.*?</table>", "", t, flags=_re.DOTALL | _re.IGNORECASE)
+            t = _re.sub(r"</?table[^>]*>", "", t, flags=_re.IGNORECASE)
+            t = t.strip()
+            if last_h2 and t.startswith(last_h2):
+                t = t[len(last_h2):].lstrip(":.").strip()
+            t = _re.sub(r"^\\d+\\.\\s+", "", t)
+            if t:
+                b.text = t
+                out.append(b)
+            continue
+        out.append(b)
+    return out
+
+
+def _ai_to_chapters(ai_sections):
+    print('DEBUG ALL TITLES:', [i.get('title') for i in ai_sections], flush=True)
+    chapters, ack, refs, abstract = [], None, None, None
+    for item in ai_sections:
+        title = (item.get("title") or "").strip()
+        lower = title.lower()
+        content = item.get("content", "")
+        level = item.get("level", 1)
+        blocks = _parse_blocks(content)
+        blocks = _final_clean(blocks)
+        # Subheading: attach to previous chapter as h2 block + content
+        if level == 2 and chapters:
+            parent = chapters[-1]
+            parent.blocks.append(Block(type="h2s", text=title))
+            parent.blocks.extend(blocks)
+            continue
+        # APPLY_CLEAN_TO_BLOCKS: force unescape one more time on all text
+        from .content import _clean as _clean_fn
+        for _b in blocks:
+            if _b.text:
+                _b.text = _clean_fn(_b.text)
+            if _b.items:
+                if getattr(_b, 'type', '') == 'table':
+                    _b.items = [[_clean_fn(c) for c in (row or [])] for row in _b.items]
+                else:
+                    _b.items = [_clean_fn(i) for i in _b.items]
+        paragraphs = [b.text for b in blocks if b.type == "p"]
+        section = Section(title=title, paragraphs=paragraphs, blocks=blocks)
+        # Normalize title for matching
+        norm = re.sub(r"^\d+(\.\d+)*\.?\s*", "", lower).strip().rstrip(":").rstrip(".")
+        def _has(*keys):
+            return any(k in norm for k in keys)
+        if _has("acknowledg"):
+            ack = section
+        elif _has("reference", "bibliography"):
+            refs = section
+        elif norm in ("abstract", "summary") or norm.endswith("abstract"):
+            abstract = section
+        elif _has("appendix", "appendices", "table of contents"):
+            pass
+        else:
+            chapters.append(section)
+    import re as _renum
+    for i, ch in enumerate(chapters, 1):
+        if _renum.match(r"^\d+", ch.title):
+            ch.heading = ch.title
+        else:
+            ch.heading = f"{i}. {ch.title}"
+    import re as _rn2
+    for _ch in chapters:
+        _m = _rn2.match(r"^(\d+)", _ch.heading)
+        if not _m:
+            continue
+        _k = 0
+        for _b in _ch.blocks:
+            if _b.type == "h2s" and not _rn2.match(r"^\d", _b.text or ""):
+                _k += 1
+                _b.text = f"{_m.group(1)}.{_k} {_b.text}"
+    return chapters, ack, refs, abstract
+
+
+def generate_report_pdf(project_profile, sections, sample_pdf=None, project_root=None, uploaded_images=None):
+    if not sample_pdf:
+        raise ReportRenderError("A sample PDF is required.")
+
+    d = extract_design(sample_pdf)
+    ctx = build_context(project_profile, sections)
+    ctx["logo_uri"] = d.logo_uri
+
+    chapters, ack, refs = [], None, None
+    try:
+        from . import ai_writer
+        _ps = ""
+        for _s in (sections or []):
+            _sid = _s.get("id") if isinstance(_s, dict) else getattr(_s, "id", "")
+            if _sid == "problem-statement":
+                _c = _s.get("content") if isinstance(_s, dict) else getattr(_s, "content", "")
+                _ps = str(_c or "").strip()[:600]
+                break
+        if not _ps:
+            _ps = _get_problem_statement(project_profile, project_root)
+        print(f"[PS] problem statement: {_ps[:80]!r}", flush=True)
+        _key = _cache_key(sections, extra=_ps + '|v6|' + _sample_sig(sample_pdf)); from . import ai_writer as _aw; from .pdf_structure import sample_len_scale as _sls; _aw.LEN_SCALE = _sls(sample_pdf)
+        _cached = _load_cache(project_root, _key)
+        if _cached:
+            print(f"[AI] Using cached sections ({_key})", flush=True)
+            ai_sections = _cached
+        else:
+            print(f"[AI] Generating sections ({_key})...", flush=True)
+            _custom = None
+            # User-saved chapters take priority
+            if project_root:
+                try:
+                    from pathlib import Path as _P
+                    saved = _P(project_root) / "_user_chapters.txt"
+                    if saved.exists():
+                        lines = [ln.strip() for ln in saved.read_text(encoding="utf-8").splitlines() if ln.strip()]
+                        if lines:
+                            _custom = [{"title": ln, "depth": 1} for ln in lines]
+                            print(f"[AI] Using {len(_custom)} USER-SAVED chapters", flush=True)
+                except Exception as _e:
+                    print(f"[AI] user chapters read failed: {_e}", flush=True)
+            # Otherwise extract from sample PDF
+            if not _custom and sample_pdf:
+                try:
+                    _custom = extract_structure(sample_pdf)
+                    if _custom:
+                        print(f"[AI] Extracted {len(_custom)} headings from sample PDF", flush=True)
+                    else:
+                        print("[AI] Structure extraction returned 0 headings, using defaults", flush=True)
+                except Exception as _e:
+                    print(f"[AI] Structure extraction failed: {_e}", flush=True)
+
+            _has_appendices = False
+            if _custom:
+                for _h in _custom:
+                    _t = (_h.get("title") or "").lower()
+                    if "appendic" in _t:
+                        _has_appendices = True
+                        break
+            ctx["has_appendices"] = _has_appendices
+            print(f"[AI] sample has appendices: {_has_appendices}", flush=True)
+            ai_sections = ai_writer.generate_sections(
+                dict(_facts_from_context(ctx), problem_statement=_ps),
+                progress=lambda m: print(m, flush=True),
+                custom_headings=_custom,
+            )
+            _save_cache(project_root, _key, ai_sections)
+        chapters, ack, refs, abstract = _ai_to_chapters(ai_sections)
+        ctx["chapters"] = chapters
+        ctx["acknowledgement"] = ack
+        ctx["references_section"] = refs
+        ctx["abstract"] = abstract
+        print(f"[AI] {len(chapters)} chapters | ack={bool(ack)} | refs={bool(refs)} | abstract={bool(abstract)}", flush=True)
+    except Exception as exc:
+        log.warning("AI generation failed: %s", exc)
+        print(f"[AI] FAILED: {exc}", flush=True)
+
+    uploaded_imgs = _uploaded_to_report_images(uploaded_images)
+    disk_imgs = select_project_images(project_root)
+    imgs = (uploaded_imgs if uploaded_imgs else disk_imgs)[:8]
+    if imgs and chapters:
+        import re as _rp
+        _GEN = _rp.compile(r"^(img|image|pic|photo|screenshot|screen|fig|figure)?[\s_-]*\d*$", _rp.I)
+        _cand = []
+        for _tier in (("result", "output", "testing", "evaluation"), ("implementation", "main text", "main body", "design", "architecture", "system"), ("solution", "methodolog")):
+            _cand = [c for c in chapters if any(w in (c.title or "").lower() for w in _tier)]
+            if _cand:
+                break
+        if not _cand:
+            _cand = [chapters[len(chapters) // 2]]
+        _cand = _cand[:1]
+        _assign = []
+        for n, img in enumerate(imgs):
+            cap = (getattr(img, "caption", "") or "").strip()
+            best, bs = None, 0
+            if cap and not _GEN.match(cap):
+                words = set(_rp.findall(r"[a-z]{4,}", cap.lower()))
+                for c in chapters:
+                    sc = len(words & set(_rp.findall(r"[a-z]{4,}", (c.title or "").lower())))
+                    if sc > bs:
+                        best, bs = c, sc
+            if best is None:
+                best = _cand[n % len(_cand)]
+            _assign.append((chapters.index(best), n, img, cap))
+        _assign.sort(key=lambda t: (t[0], t[1]))
+        for fig_no, (ci, n, img, cap) in enumerate(_assign, 1):
+            ch = chapters[ci]
+            topic = _rp.sub(r"^\d+(\.\d+)*\.?\s*", "", ch.title or "").strip().rstrip(":. ").lower()
+            if not cap or _GEN.match(cap):
+                cap = f"Screenshot illustrating {topic}"
+            cap = cap[0].upper() + cap[1:]
+            ch.blocks.append(Block(type="p", text=f"The output relevant to this stage is shown in Figure {fig_no}."))
+            ch.blocks.append(Block(type="figure", text=f"Figure {fig_no}: {cap}", image_uri=img.data_uri))
+        print(f"[IMG] Placed {len(_assign)} images inside chapters", flush=True)
+    imgs = []
+    css_v = tokens_to_css_vars(d)
+    css_b = _css_body()
+
+    html_pass1 = render_report_html(css_v, css_b, ctx, imgs)
+    _nfig = html_pass1.count("<figure")
+    print(f"[DBG] HTML has {_nfig} <figure> tags, len={len(html_pass1)}", flush=True)
+    _i = html_pass1.find("<figure")
+    if _i >= 0:
+        print(f"[DBG] first: {html_pass1[_i:_i+300]!r}", flush=True)
+    pdf_pass1 = _render_pdf(html_pass1)
+
+    return pdf_pass1

@@ -1,0 +1,30 @@
+﻿<section class="page toc" id="anchor-toc">
+  <h1>Table of Contents</h1>
+  <div class="rule"></div>
+  <ol class="toc-list">
+    <li>
+      <span class="toc-title">Acknowledgement</span>
+      <span class="toc-page" data-toc-anchor="anchor-ack">1</span>
+    </li>
+    <li>
+      <span class="toc-title">Abstract</span>
+      <span class="toc-page" data-toc-anchor="anchor-abstract">2</span>
+    </li>
+    {% for ch in ctx.chapters %}
+    <li>
+      <span class="toc-title">{{ ch.heading }}</span>
+      <span class="toc-page" data-toc-anchor="anchor-chapter-{{ loop.index }}">?</span>
+    </li>
+    {% endfor %}
+    {% if ctx.has_appendices %}
+    <li>
+      <span class="toc-title">{{ ctx.chapters|length + 1 }}. Appendices</span>
+      <span class="toc-page" data-toc-anchor="anchor-appendices">?</span>
+    </li>
+    {% endif %}
+    <li>
+      <span class="toc-title">{{ ctx.chapters|length + (2 if ctx.has_appendices else 1) }}. References</span>
+      <span class="toc-page" data-toc-anchor="anchor-references">?</span>
+    </li>
+  </ol>
+</section>

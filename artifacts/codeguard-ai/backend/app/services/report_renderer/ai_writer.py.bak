@@ -1,0 +1,376 @@
+﻿"""AI report writer - supports Ollama (local) and Groq (cloud)."""
+
+import sys as _sys
+try:
+    _sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    _sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
+
+import json
+import os
+import urllib.error
+import urllib.request
+from pathlib import Path
+
+# Load .env from the repo root so env vars are available in dev and prod.
+try:
+    from dotenv import load_dotenv
+    _env_path = Path(__file__).resolve().parents[6] / ".env"
+    if _env_path.exists():
+        load_dotenv(_env_path)
+except Exception:
+    pass
+
+AI_PROVIDER = os.getenv("AI_PROVIDER", "ollama").strip().lower()
+
+OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.1:8b")
+
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
+GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-20b")
+GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
+
+TIMEOUT_SECONDS = 600
+
+
+SECTION_SPECS = [
+    {
+        "title": "Acknowledgement",
+        "focus_keys": ["project_name"],
+        "instruction": (
+            "Write 150-200 words of formal academic acknowledgement. "
+            "Thank the academic institution, project guide, and collaborators generically. "
+            "Use a warm, professional tone. Do not invent specific names."
+        ),
+    },
+    {
+        "title": "Abstract",
+        "focus_keys": ["project_name", "project_type", "readme_summary", "languages", "frameworks", "features"],
+        "instruction": (
+            "Write a formal academic abstract of 200-260 words. "
+            "Cover: what the project is, what problem it solves, technologies used, "
+            "what it produces, and its main outcome. Do not repeat the same sentence twice."
+        ),
+    },
+    {
+        "title": "Introduction",
+        "focus_keys": ["project_name", "project_type", "readme_summary"],
+        "instruction": (
+            "Write 180-220 words introducing the project. "
+            "Cover the domain, why automated project analysis matters, and the project's goal. "
+            "Open with a general statement about the problem space, then narrow to this project."
+        ),
+    },
+    {
+        "title": "Background and Problem Statement",
+        "focus_keys": ["project_name", "readme_summary", "features"],
+        "instruction": (
+            "Write 180-220 words. Explain the specific problem this project addresses. "
+            "Describe what the current manual or existing approach looks like, its limitations, "
+            "and why this project is needed. End with a clear problem statement."
+        ),
+    },
+    {
+        "title": "Methodology",
+        "focus_keys": ["languages", "frameworks", "libraries", "backend", "frontend", "database"],
+        "instruction": (
+            "Write 200-260 words describing the development methodology. "
+            "Focus ONLY on technologies: languages, frameworks, libraries, backend, frontend, database. "
+            "Explain how they were chosen and how they work together. Do not repeat the project's purpose."
+        ),
+    },
+    {
+        "title": "System Architecture and Implementation",
+        "focus_keys": ["modules", "entry_points", "apis", "folder_structure", "important_files"],
+        "instruction": (
+            "Write 200-260 words describing the system architecture and implementation. "
+            "Focus ONLY on structure: modules, entry points, APIs, folder organization, key files. "
+            "Describe how the components fit together technically."
+        ),
+    },
+    {
+        "title": "Features and Functionality",
+        "focus_keys": ["features", "apis", "modules"],
+        "instruction": (
+            "Write 180-220 words describing the specific features the project provides. "
+            "Focus ONLY on capabilities: what a user can do, what each feature does, how APIs support them. "
+            "Do not repeat architecture details."
+        ),
+    },
+    {
+        "title": "Results and Discussion",
+        "focus_keys": ["project_name", "features", "readme_summary"],
+        "instruction": (
+            "Write 160-200 words discussing the results. "
+            "Describe what the finished project produces as output, its working state, "
+            "and any observable characteristics. Do not invent metrics or performance numbers."
+        ),
+    },
+    {
+        "title": "Outcomes and Learning",
+        "focus_keys": ["languages", "frameworks", "libraries"],
+        "instruction": (
+            "Write 160-200 words describing the skills and knowledge gained. "
+            "Focus ONLY on technologies and engineering practices: what was learned from working with "
+            "these specific languages, frameworks, and tools."
+        ),
+    },
+    {
+        "title": "Conclusions and Recommendations",
+        "focus_keys": ["project_name", "features", "languages", "frameworks"],
+        "instruction": (
+            "Write 200-260 words. First summarize the project in 2 paragraphs, then give "
+            "5-7 concrete recommendations for future enhancement. "
+            "Number the recommendations and make each one specific to this technology stack."
+        ),
+    },
+    {
+        "title": "References",
+        "focus_keys": ["languages", "frameworks", "libraries", "backend", "frontend", "database"],
+        "instruction": (
+            "Write a formal references list with 10-14 entries. "
+            "Use ONLY official documentation sources for the technologies listed in the facts "
+            "(e.g., Python.org, FastAPI docs, React docs). "
+            "Format each entry in a consistent academic style. Do not invent papers or authors. "
+            "One reference per line, numbered."
+        ),
+    },
+]
+
+
+def _facts_subset(facts, keys):
+    lines = []
+    for key in keys:
+        value = facts.get(key)
+        if not value:
+            continue
+        if isinstance(value, (list, tuple)):
+            value = ", ".join(str(v) for v in value if v)
+        value = str(value).strip()
+        if value and value.lower() not in ("not detected", "not provided", "none"):
+            lines.append(f"- {key.replace('_', ' ').title()}: {value}")
+    return "\n".join(lines) if lines else "- (limited facts)"
+
+
+def _build_prompt(title, instruction, subset):
+    return (
+        "You are writing a section of a formal academic internship report.\n\n"
+        "STRICT RULES:\n"
+        "1. Use ONLY the facts listed below.\n"
+        "2. Do NOT invent names, dates, organisations, metrics, or statistics.\n"
+        "3. Do NOT repeat the same sentence that appears in other sections.\n"
+        "4. Structure long sections with subheadings on their own line: '## Subheading'.\n"
+        "5. Break text into short paragraphs (2-4 sentences). Never write walls of text.\n"
+        "6. When it helps, include ONE markdown table with a header and body rows:\n"
+        "   | Column A | Column B |\n"
+        "   | Value 1  | Value 2  |\n"
+
+        "7. Do NOT start with 'CodeGuard AI is a full-stack web application...'.\n"
+        "8. Vary your opening sentence for each section.\n"
+        "9. For the Conclusions and Recommendations section, put each recommendation on its\n"
+        "   own line, starting with '1. ', '2. ', '3. ', etc.\n"
+        "10. For the References section, put each reference on its own line, starting with\n"
+        "   '1. ', '2. ', '3. ', etc.\n"
+        "11. For lists of features, modules, or bullets, put each item on its own line\n"
+        "   starting with '- '.\n"
+        "12. NEVER use emoji, pin symbols (like the pushpin), or unicode icons.\n"
+        "13. After a '## Subheading' line, do NOT repeat the subheading text\n"
+        "    at the start of the next paragraph.\n\n"
+        f"FACTS FOR THIS SECTION:\n{subset}\n\n"
+        f"SECTION TITLE: {title}\n"
+        f"INSTRUCTIONS: {instruction}\n\n"
+        "14. If you need a table, use EXACTLY this markdown format, one row per line:\n"
+        "    | Header A | Header B |\n"
+        "    | --- | --- |\n"
+        "    | value 1 | value 2 |\n"
+        "    NEVER emit HTML <table> tags. NEVER write cells without ' | ' separators.\n\n"
+        "Return ONLY the section body. No top-level title. Use ## for subheadings."
+    )
+
+
+def _call_ollama(prompt):
+    payload = {
+        "model": OLLAMA_MODEL,
+        "prompt": prompt,
+        "stream": False,
+        "options": {"temperature": 0.55, "num_predict": 1000, "num_ctx": 4096},
+    }
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(
+        f"{OLLAMA_URL}/api/generate",
+        data=data,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=TIMEOUT_SECONDS) as resp:
+        body = resp.read().decode("utf-8")
+    return (json.loads(body).get("response") or "").strip()
+
+
+def _call_groq(prompt):
+    """Call Groq via the official SDK with a fallback chain.
+
+    Treats responses under 200 characters as failures (likely refusals),
+    and tries the next model. Each model gets 2 attempts.
+    """
+    if not GROQ_API_KEY:
+        raise RuntimeError("GROQ_API_KEY is not set but AI_PROVIDER=groq")
+
+    from groq import Groq
+
+    client = Groq(api_key=GROQ_API_KEY, timeout=TIMEOUT_SECONDS)
+
+    models_to_try = [
+        GROQ_MODEL,
+        "openai/gpt-oss-120b",
+        "qwen/qwen3.8-27b",
+        "groq/compound-mini",
+        "groq/compound",
+    ]
+
+    system_prompt = (
+        "You are a professional academic writer. "
+        "You write formal, structured internship report sections. "
+        "Structure long sections with '## Subheading' lines. "
+        "Include markdown tables (| col | col |) where useful. "
+        "Break long text into 2-4 sentence paragraphs. "
+        "Always produce the full requested word count. "
+        "Never refuse a writing task. "
+        "Never output apologies or disclaimers. "
+        "Never use emoji, pin symbols (like the pushpin icon), or any unicode icon. "
+        "Never repeat the subheading text at the start of a paragraph."
+    )
+
+    for model_name in models_to_try:
+        for attempt in range(2):
+            try:
+                response = client.chat.completions.create(
+                    model=model_name,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": prompt},
+                    ],
+                    temperature=0.6 + (0.1 * attempt),
+                    max_tokens=1200,
+                )
+                if response.choices:
+                    content = (response.choices[0].message.content or "").strip()
+                    if len(content) >= 200:
+                        return content
+            except Exception:
+                continue
+
+    return ""
+
+
+def _call_ai(prompt):
+    if AI_PROVIDER == "groq":
+        return _call_groq(prompt)
+    return _call_ollama(prompt)
+
+
+def _specs_from_headings(headings):
+    """Build SECTION_SPECS-like list from extracted headings."""
+    if not headings or len(headings) < 5:
+        return None
+
+    out = []
+    # ALWAYS produce Acknowledgement + Abstract (regardless of sample)
+    out.append({
+        "title": "Acknowledgement",
+        "focus_keys": ["project_name"],
+        "instruction": ("Write 150-200 words of formal academic acknowledgement. "
+                        "Thank the academic institution, project guide, and collaborators "
+                        "generically. Do not invent specific names. Warm, professional tone."),
+    })
+    out.append({
+        "title": "Abstract",
+        "focus_keys": ["project_name", "project_type", "readme_summary",
+                       "languages", "frameworks", "features"],
+        "instruction": ("Write 220-280 words of formal academic abstract. Cover what the "
+                        "project is, the problem it solves, technologies used, what it "
+                        "produces, and the main outcome."),
+    })
+    titles_lower = " ".join((h.get("title") or "").lower() for h in headings)
+    for h in headings:
+        title = (h.get("title") or "").strip()
+        _tlo = title.lower()
+        if any(k in _tlo for k in ("acknowledg", "abstract")):
+            continue
+        import re as _re
+        # Detect subheading: number like 5.1 or 5.1.1
+        is_sub = bool(_re.match(r"^\d+\.\d+", title))
+        # Strip ANY leading number
+        clean = _re.sub(r"^\d+(?:\.\d+)*\.?\s*", "", title).strip()
+        if not clean:
+            clean = title
+
+        # Unconditionally skip ML/Flask chapters (tool is for code projects)
+        BLACKLIST = (
+            "flask backend", "flask web application", "machine learning model",
+            "random forest", "decision tree", "k-nearest", "knn",
+            "xgboost", "prediction output", "dataset description",
+            "data preprocessing", "exploratory data analysis",
+            "model evaluation", "model development",
+        )
+        clean_lower = clean.lower()
+        if any(b in clean_lower for b in BLACKLIST):
+            continue
+
+        out.append({
+            "title": clean,
+            "level": 2 if is_sub else 1,
+            "focus_keys": ["project_name", "project_type", "readme_summary",
+                           "languages", "frameworks", "libraries",
+                           "frontend", "backend", "database",
+                           "apis", "modules", "features",
+                           "entry_points", "tests", "important_files"],
+            "instruction": (
+                f"Write a detailed section titled '{clean}'. "
+                "Base it only on the project facts provided. "
+                "Use 2-4 short paragraphs. If helpful, include one "
+                "markdown table (| Column | Column |) or a [FIGURE: caption] "
+                "line. Do not repeat the heading at the start of the paragraph."
+            ),
+        })
+    return out
+
+
+def _roman_fix(text):
+    """ROMAN_FIX_APPLY: fix '1 would like' -> 'I would like'."""
+    import re as _re
+    # After sentence break or start
+    text = _re.sub(r"(^|[.!?]\s+)1\s+(would|am|have|had|will|was|wish|extend|express|sincerely|thank|acknowledge)", r"\1I \2", text)
+    # Anywhere else: " 1 " at start of a word followed by verb
+    text = _re.sub(r"\b1\s+(would|am|have|had|wish|extend|express|acknowledge)", r"I \1", text)
+    return text
+
+
+def generate_sections(facts, progress=None, custom_headings=None):
+    specs_to_use = _specs_from_headings(custom_headings) if custom_headings else None
+    if not specs_to_use:
+        specs_to_use = SECTION_SPECS
+        print("[AI] Using default SECTION_SPECS", flush=True)
+    else:
+        print(f"[AI] Using {len(specs_to_use)} custom headings from sample PDF", flush=True)
+    out = []
+    for i, spec in enumerate(specs_to_use, start=1):
+        title = spec["title"]
+        if progress:
+            progress(f"[{i}/{len(specs_to_use)}] {title}...")
+        subset = _facts_subset(facts, spec["focus_keys"])
+        prompt = _build_prompt(title, spec["instruction"], subset)
+        try:
+            content = _call_ai(prompt)
+        except Exception as exc:
+            content = f"[AI generation failed: {exc}]"
+        if not content:
+            content = "[AI returned empty content]"
+        content = _roman_fix(content)
+        print(f"[DBG-RAW] {title} :: {content[:1800]!r}", flush=True)
+        out.append({"title": title, "content": content, "level": spec.get("level", 1)})
+        if progress:
+            progress(f"    -> {len(content)} chars")
+    return out

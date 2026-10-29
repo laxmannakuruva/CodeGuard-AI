@@ -1,0 +1,16 @@
+<section class="page toc">
+  <h1 style="font-size:22pt; font-weight:bold; margin-bottom:20px;">Table of Contents</h1>
+  <div style="border-top:3px solid #222; margin-bottom:20px;"></div>
+  <div style="width:100%; font-size:14pt; line-height:1.6;">
+    {% for ch in ctx.chapters %}
+    <div style="display:block; margin-bottom:12px; page-break-inside:avoid;">
+      <span style="display:inline-block; width:40px; font-weight:bold;">{{ loop.index }}.</span>
+      <span style="display:inline;">{{ ch.title | replace('##', '') | replace('#', '') }}</span>
+    </div>
+    {% endfor %}
+    <div style="display:block; margin-bottom:12px; page-break-inside:avoid;">
+      <span style="display:inline-block; width:40px; font-weight:bold;">{{ ctx.chapters|length + 1 }}.</span>
+      <span style="display:inline;">References</span>
+    </div>
+  </div>
+</section>

@@ -1,0 +1,377 @@
+﻿@page {
+  size: A4;
+  margin: 15mm;
+  border: 1pt solid #000;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: #fff;
+  color: #000;
+  font-family: "DejaVu Serif", Georgia, 'Times New Roman', serif;
+  font-size: 11.5pt;
+  line-height: 1.65;
+}
+
+.page { padding: 8mm; page-break-after: always; }
+.page:last-child { page-break-after: auto; }
+
+h1 { font-size: 18pt; line-height: 1.3; margin: 0 0 12pt 0; page-break-after: avoid; }
+h2 { font-size: 13pt; line-height: 1.3; margin: 16pt 0 8pt 0; page-break-after: avoid; }
+p  { margin: 0 0 10pt 0; text-align: justify; orphans: 4; widows: 4; }
+
+ol, ul { margin: 6pt 0 14pt 0; padding-left: 24pt; }
+li     { margin: 0 0 8pt 0; line-height: 1.65; display: list-item; }
+
+.cover { text-align: center; padding-top: 60mm; }
+.cover .kicker { font-size: 11pt; letter-spacing: 3pt; text-transform: uppercase; margin-bottom: 22pt; }
+.cover .on { font-size: 12pt; letter-spacing: 1.5pt; margin: 8pt 0; }
+.cover h1.project-title { font-size: 26pt; line-height: 1.25; margin: 20pt 0 30pt 0; font-weight: 700; }
+.cover .by { font-size: 12pt; margin-top: 30pt; }
+.cover .student-line { font-size: 13pt; margin: 4pt 0; font-weight: 600; }
+.cover .submission { font-style: italic; font-size: 11pt; margin: 30pt auto 0 auto; color: #333; }
+.cover .date { font-size: 12pt; margin-top: 30pt; }
+
+.front h1 { text-align: center; text-transform: uppercase; letter-spacing: 1.5pt; margin: 0 0 6pt 0; }
+.front .rule { height: 1.2pt; background: #000; margin: 0 auto 22pt auto; width: 30%; }
+
+.chapter .chapter-title { border-bottom: 1.2pt solid #000; padding-bottom: 6pt; margin: 0 0 16pt 0; font-size: 18pt; }
+
+.toc-list { list-style: none; padding: 0; margin: 12pt 0 0 0; }
+.toc-list li { display: flex; align-items: baseline; margin: 8pt 0; }
+.toc-list .toc-title { font-weight: 600; flex-shrink: 0; }
+.toc-list .toc-dots { flex: 1; border-bottom: 1pt dotted #333; margin: 0 6pt; transform: translateY(-4pt); min-width: 20pt; }
+.toc-list .toc-page { font-weight: 700; flex-shrink: 0; min-width: 2ch; text-align: right; text-decoration: none; color: #000; }
+.toc-list .toc-page::after { content: target-counter(attr(href), page); }
+
+table.data { width: 100%; border-collapse: collapse; margin: 12pt 0 18pt 0; font-size: 10.5pt; }
+table.data th, table.data td { border: 0.75pt solid #000; padding: 7pt 9pt; text-align: left; vertical-align: top; }
+table.data th { background: #f0f0f0; font-weight: 700; }
+
+figure.figure { display: block !important; }
+figure.figure img { max-width: 100%; max-height: 240pt; border: 0.75pt solid #000; padding: 4pt; }
+figure.figure figcaption { font-size: 9.5pt; font-style: italic; margin-top: 6pt; }
+
+.references-list { padding-left: 24pt; list-style: decimal; }
+.references-list li { margin: 0 0 12pt 0; line-height: 1.6; display: list-item; }
+
+pre.tree {
+  font-family: Consolas, monospace;
+  font-size: 9.5pt;
+  line-height: 1.5;
+  background: #fafafa;
+  border: 0.75pt solid #333;
+  padding: 10pt 12pt;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.notice { font-style: italic; color: #333; }
+/* hard overrides Ã¢â‚¬â€ last-wins */
+.references-list,
+.references-list li,
+ol, ul, li {
+  display: block !important;
+  width: 100%;
+}
+.references-list li::before {
+  content: counter(list-item) ". ";
+  font-weight: 700;
+}
+.references-list { counter-reset: list-item; }
+.references-list li { counter-increment: list-item; }
+
+/* --- references: force each item on its own line --- */
+.references-list,
+.references-list li {
+  display: block !important;
+  white-space: normal !important;
+  width: 100%;
+}
+.references-list { counter-reset: refcounter; padding-left: 24pt; }
+.references-list li { counter-increment: refcounter; margin: 0 0 12pt 0; }
+.references-list li::before {
+  content: counter(refcounter) ". ";
+  font-weight: 700;
+}
+
+/* ===== TOC with dot leaders (overrides previous TOC rules) ===== */
+.toc-list {
+  list-style: none !important;
+  padding: 0 !important;
+  margin: 12pt 0 0 0 !important;
+}
+.toc-list li {
+  display: block !important;
+  margin: 6pt 0 !important;
+  line-height: 1.6;
+}
+.toc-list li a {
+  display: block;
+  color: #000;
+  text-decoration: none;
+  font-weight: 600;
+}
+.toc-list li a::after {
+  content: leader('.') " " target-counter(attr(href), page);
+  font-weight: 700;
+}
+
+/* Long paths must wrap, not overflow */
+li, p, td {
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+pre.tree {
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* Optional: kill page numbers if you don't want them */
+@page {
+  @bottom-center { content: counter(page); font-size: 10pt; color: #333; }
+  @bottom-right { content: none; }
+}
+
+/* Remove all page numbers */
+@page {
+  
+  
+  
+  @bottom-left { content: none; }
+  @bottom-center { content: counter(page); font-size: 10pt; color: #333; }
+  @bottom-right { content: none; }
+}
+
+/* TOC: remove the page number after the dots */
+.toc-list li a::after {
+  content: none !important;
+}
+
+/* Long folder paths must wrap */
+li, p, td {
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+/* subheadings inside chapters */
+.chapter h2.subheading {
+  font-size: 12pt;
+  font-weight: 700;
+  margin: 16pt 0 6pt 0;
+  padding: 0;
+  border: none;
+  page-break-after: avoid;
+  color: #000;
+}
+
+/* figure placeholder */
+figure.figure { margin: 16pt auto; text-align: center; page-break-inside: avoid; }
+figure.figure .figure-placeholder {
+  border: 1pt dashed #888; padding: 24pt 12pt; background: #fafafa;
+  font-family: Consolas, monospace; font-size: 10pt; color: #666;
+}
+figure.figure figcaption { font-size: 9.5pt; font-style: italic; margin-top: 6pt; }
+
+
+/* TOC: dots + page numbers */
+.toc-list { list-style: none !important; padding: 0 !important; margin: 12pt 0 0 0 !important; }
+.toc-list li { display: flex !important; align-items: baseline; margin: 8pt 0 !important; }
+.toc-list .toc-title { font-weight: 600; flex-shrink: 0; }
+.toc-list .toc-dots {
+  flex: 1;
+  border-bottom: 1pt dotted #333;
+  margin: 0 6pt;
+  transform: translateY(-4pt);
+  min-width: 20pt;
+}
+.toc-list .toc-page { font-weight: 700; flex-shrink: 0; min-width: 2ch; text-align: right; }
+
+/* Cover stacked lines */
+.cover .student-line { display: block !important; width: 100%; font-size: 13pt; margin: 4pt 0; font-weight: 600; }
+.cover .by { display: block !important; }
+
+/* Gallery */
+.gallery { display: block; margin-top: 12pt; }
+.gallery-item { display: block; page-break-inside: avoid; margin: 14pt 0; text-align: center; }
+.gallery-item img { max-width: 100%; max-height: 320pt; border: 0.75pt solid #333; padding: 4pt; }
+.gallery-item figcaption { font-size: 10pt; font-style: italic; margin-top: 6pt; color: #333; }
+
+
+/* Kill all page numbers */
+@page {  
+         @bottom-left { content: none !important; }
+        @bottom-center { content: counter(page) !important; font-size: 10pt; color: #333; } @bottom-right { content: none !important; } }
+
+/* TOC plain list */
+.toc-list { list-style: none !important; padding: 0 !important; margin: 12pt 0 0 0 !important; }
+.toc-list li { display: block !important; margin: 8pt 0 !important; padding: 0 !important; }
+.toc-list .toc-title { font-weight: 600; }
+.toc-list .toc-page, .toc-list .toc-dots { display: none !important; }
+
+/* Gallery */
+.gallery { display: block; margin-top: 12pt; }
+.gallery-item { display: block; page-break-inside: avoid; margin: 14pt 0; text-align: center; }
+.gallery-item img { max-width: 100%; max-height: 340pt; border: 0.75pt solid #333; padding: 4pt; }
+.gallery-item figcaption { font-size: 10pt; font-style: italic; margin-top: 6pt; color: #333; }
+
+
+/* Tables should not split across pages */
+table.data { page-break-inside: avoid !important; break-inside: avoid !important; }
+table.data tr { page-break-inside: avoid !important; break-inside: avoid !important; }
+
+/* Cover: force stacked lines */
+.cover .student-line { display: block !important; width: 100% !important; clear: both; }
+.cover .by { display: block !important; }
+
+
+/* Tables should not split across pages */
+table.data { page-break-inside: avoid !important; break-inside: avoid !important; }
+table.data tr { page-break-inside: avoid !important; break-inside: avoid !important; }
+
+/* Cover: force stacked lines */
+.cover .student-line { display: block !important; width: 100% !important; clear: both; }
+.cover .by { display: block !important; }
+
+
+/* Figures inside chapters */
+figure.figure { margin: 16pt auto; text-align: center; page-break-inside: avoid; }
+figure.figure img { max-width: 100%; max-height: 340pt; border: 0.75pt solid #333; padding: 4pt; }
+figure.figure figcaption { font-size: 10pt; font-style: italic; margin-top: 6pt; color: #333; }
+
+
+/* Figures inside chapters */
+figure.figure { margin: 16pt auto; text-align: center; page-break-inside: avoid; }
+figure.figure img { max-width: 100%; max-height: 340pt; border: 0.75pt solid #333; padding: 4pt; }
+figure.figure figcaption { font-size: 10pt; font-style: italic; margin-top: 6pt; color: #333; }
+
+/* Show figures with real images (override old hide rule) */
+figure.figure {
+  display: block !important;
+  margin: 16pt auto;
+  text-align: center;
+  page-break-inside: avoid;
+}
+figure.figure img {
+  max-width: 100%;
+  max-height: 340pt;
+  border: 0.75pt solid #333;
+  padding: 4pt;
+  display: block;
+  margin: 0 auto;
+}
+figure.figure figcaption {
+  font-size: 10pt;
+  font-style: italic;
+  margin-top: 6pt;
+  color: #333;
+}
+
+/* Page numbers: bottom-center, hidden on cover page */
+@page {
+  @bottom-center {
+    content: counter(page);
+    font-size: 10pt;
+    color: #333;
+    font-family: Georgia, "Times New Roman", serif;
+    vertical-align: middle;
+    padding-bottom: 6mm;
+  }
+}
+@page :first {
+  @bottom-center {
+    content: none;
+  }
+}
+
+/* ================= FINAL FIXES ================= */
+
+/* 1. Cover: force student name and roll number to stack on separate lines */
+.cover .student-line {
+  display: block !important;
+  width: 100% !important;
+  clear: both !important;
+  text-align: center;
+}
+.cover .by { display: block !important; }
+.cover .kicker, .cover .on, .cover .submission, .cover .date {
+  display: block !important;
+}
+
+/* 2. Headings: ensure h1 is block, add bottom margin so following paragraph has space */
+.chapter-title, .page.front h1, .cover h1 {
+  display: block !important;
+}
+h1 + p, h1 + div, h1 + h2 {
+  margin-top: 12pt !important;
+}
+.page.front h1 { margin-bottom: 14pt !important; }
+
+/* 3. Remove any stray page-number artifacts at top of pages */
+@page {
+  
+  
+  
+}
+
+/* 4. Ensure page numbers show at bottom-center of every page except cover */
+@page {
+  @bottom-center {
+    content: counter(page);
+    font-size: 10pt;
+    color: #333;
+    font-family: Georgia, "Times New Roman", serif;
+    vertical-align: middle;
+    padding-bottom: 6mm;
+  }
+}
+@page :first {
+  @bottom-center {
+    content: none !important;
+  }
+}
+
+
+/* abstract-heading-space */
+.page.front h1 {
+  display: block !important;
+  margin: 0 0 16pt 0 !important;
+}
+
+
+/* TOC FINAL FIX */
+.toc-list { list-style: none !important; padding: 0 !important; margin: 12pt 0 0 0 !important; }
+.toc-list li {
+  display: block !important;
+  margin: 6pt 0 !important;
+  padding: 0 !important;
+  width: 100% !important;
+  clear: both !important;
+}
+.toc-list .toc-title { display: inline !important; font-weight: 600 !important; font-size: 11.5pt !important; }
+
+.tocx-row { display: block; margin: 0 0 12px 0; font-size: 13pt; line-height: 1.5; }
+.tocx-row a { display: block; color: #000; text-decoration: none; }
+.tocx-row a::after { content: leader('.') target-counter(attr(href), page); }
+
+
+section.chapter table td:first-child, section.chapter table th:first-child { width: 22%; }
+
+/* final page border, every page */
+@page { margin: 15mm; border: 1pt solid #000; }
+@page :first { border: 1pt solid #000; }
+
+section.chapter figure img { max-height: 70mm !important; width: auto !important; max-width: 100% !important; }
+
+/* font from sample, lining digits */
+html, body, p, li, td, th, h1, h2, h3, figcaption, .toc, .tocx-row, .tocx-row a { font-family: var(--font-serif, 'Times New Roman'), 'Times New Roman', serif !important; font-variant-numeric: lining-nums !important; }
+@page { @bottom-center { font-family: 'Times New Roman', serif !important; font-variant-numeric: lining-nums !important; } }
+
+.tocx-sub { padding-left: 22px; font-size: 0.95em; }
+
+.page.chapter { page-break-after: auto; }
+.page.chapter + .page.chapter { margin-top: 18pt; }
+

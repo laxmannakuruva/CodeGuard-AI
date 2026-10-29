@@ -1,0 +1,604 @@
+﻿"""AI report writer - supports Ollama (local) and Groq (cloud)."""
+
+import sys as _sys
+try:
+    _sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    _sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
+
+import json
+import os
+import urllib.error
+import urllib.request
+from pathlib import Path
+
+# Load .env from the repo root so env vars are available in dev and prod.
+try:
+    from dotenv import load_dotenv
+    _env_path = Path(__file__).resolve().parents[6] / ".env"
+    if _env_path.exists():
+        load_dotenv(_env_path)
+except Exception:
+    pass
+
+AI_PROVIDER = os.getenv("AI_PROVIDER", "ollama").strip().lower()
+
+OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.1:8b")
+
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
+GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-20b")
+GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
+
+TIMEOUT_SECONDS = 600
+
+
+SECTION_SPECS = [
+    {
+        "title": "Acknowledgement",
+        "focus_keys": ["project_name"],
+        "instruction": (
+            "Write 150-200 words of formal academic acknowledgement. "
+            "Thank the academic institution, project guide, and collaborators generically. "
+            "Use a warm, professional tone. Do not invent specific names."
+        ),
+    },
+    {
+        "title": "Abstract",
+        "focus_keys": ["project_name", "project_type", "readme_summary", "languages", "frameworks", "features"],
+        "instruction": (
+            "Write a formal academic abstract of 200-260 words. "
+            "Cover: what the project is, what problem it solves, technologies used, "
+            "what it produces, and its main outcome. Do not repeat the same sentence twice."
+        ),
+    },
+    {
+        "title": "Introduction",
+        "focus_keys": ["project_name", "project_type", "readme_summary"],
+        "instruction": (
+            "Write 180-220 words introducing the project. "
+            "Cover the domain, why the project's domain matters, and the project's goal. "
+            "Open with a general statement about the problem space, then narrow to this project."
+        ),
+    },
+    {
+        "title": "Background and Problem Statement",
+        "focus_keys": ["project_name", "readme_summary", "features"],
+        "instruction": (
+            "Write 180-220 words. Explain the specific problem this project addresses. "
+            "Describe what the current manual or existing approach looks like, its limitations, "
+            "and why this project is needed. End with a clear problem statement."
+        ),
+    },
+    {
+        "title": "Methodology",
+        "focus_keys": ["languages", "frameworks", "libraries", "backend", "frontend", "database"],
+        "instruction": (
+            "Write 200-260 words describing the development methodology. "
+            "Focus ONLY on technologies: languages, frameworks, libraries, backend, frontend, database. "
+            "Explain how they were chosen and how they work together. Do not repeat the project's purpose."
+        ),
+    },
+    {
+        "title": "System Architecture and Implementation",
+        "focus_keys": ["modules", "entry_points", "apis", "folder_structure", "important_files"],
+        "instruction": (
+            "Write 200-260 words describing the system architecture and implementation. "
+            "Focus ONLY on structure: modules, entry points, APIs, folder organization, key files. "
+            "Describe how the components fit together technically."
+        ),
+    },
+    {
+        "title": "Features and Functionality",
+        "focus_keys": ["features", "apis", "modules"],
+        "instruction": (
+            "Write 180-220 words describing the specific features the project provides. "
+            "Focus ONLY on capabilities: what a user can do, what each feature does, how APIs support them. "
+            "Do not repeat architecture details."
+        ),
+    },
+    {
+        "title": "Results and Discussion",
+        "focus_keys": ["project_name", "features", "readme_summary"],
+        "instruction": (
+            "Write 160-200 words discussing the results. "
+            "Describe what the finished project produces as output, its working state, "
+            "and any observable characteristics. Do not invent metrics or performance numbers."
+        ),
+    },
+    {
+        "title": "Outcomes and Learning",
+        "focus_keys": ["languages", "frameworks", "libraries"],
+        "instruction": (
+            "Write 160-200 words describing the skills and knowledge gained. "
+            "Focus ONLY on technologies and engineering practices: what was learned from working with "
+            "these specific languages, frameworks, and tools."
+        ),
+    },
+    {
+        "title": "Conclusions and Recommendations",
+        "focus_keys": ["project_name", "features", "languages", "frameworks"],
+        "instruction": (
+            "Write 200-260 words. First summarize the project in 2 paragraphs, then give "
+            "5-7 concrete recommendations for future enhancement. "
+            "Number the recommendations and make each one specific to this technology stack."
+        ),
+    },
+    {
+        "title": "References",
+        "focus_keys": ["languages", "frameworks", "libraries", "backend", "frontend", "database"],
+        "instruction": (
+            "Write a formal references list with 10-14 entries. "
+            "Use ONLY official documentation sources for the technologies listed in the facts "
+            "(e.g., Python.org, FastAPI docs, React docs). "
+            "Format each entry in a consistent academic style. Do not invent papers or authors. "
+            "One reference per line, numbered."
+        ),
+    },
+]
+
+
+import re as _rx
+
+_UNI_MAP = {
+    "\u2011": "-", "\u2010": "-", "\u202f": " ", "\u00a0": " ",
+    "\u2009": " ", "\u200b": "", "\u2018": "'", "\u2019": "'",
+    "\u201c": '"', "\u201d": '"',
+}
+_SMALL = {"a", "an", "and", "as", "at", "but", "by", "for", "in", "nor", "of", "on", "or", "the", "to", "with"}
+_PLACEHOLDER_HDR = _rx.compile(r"^(header|column|col|heading|field)\s*[a-z0-9]?$", _rx.I)
+_BANNED = _rx.compile(
+    r"readme|not detected|no documentation|documentation (?:is|was|remains) (?:absent|missing|lacking|limited)"
+    r"|absence of (?:a |an )?(?:comprehensive |formal |detected )?documentation", _rx.I)
+_FILEREF = _rx.compile(r"\b[\w/.-]+\.(?:py|js|css|html|json|txt|md)\b|\buseruploads\b|\bapp/main\b", _rx.I)
+_TECH_WORDS = ("implement", "design", "architect", "system", "technical", "development",
+               "methodolog", "solution", "main", "module", "analysis", "result", "testing", "abstract")
+_PURPOSES = [
+    (("sector", "industry"), "Describe the industry or domain of the project subject in general terms: its scale, trends and why the problem matters. Do not name specific companies."),
+    (("organi",), "Describe, in general terms, the kind of organisation or working environment in which such a project is carried out: structure, teams, working culture. Do not invent a company name."),
+    (("history",), "Describe how this domain and its underlying technology evolved, from early approaches to current practice."),
+    (("size", "scale"), "Discuss the scale of the domain: typical users, data volumes, deployments, and the scale this project targets."),
+    (("product", "service"), "Describe the kinds of products and services found in this domain and where the project's solution fits among them."),
+    (("plan", "schedule", "program"), "Present a phase-wise internship plan (study, analysis, design, implementation, testing, documentation) as ONE table with columns Phase and Activities. Do not invent dates."),
+    (("background",), "Explain the context of the problem, who is affected, and why existing approaches fall short."),
+    (("problem",), "State the problem precisely: objectives, scope, constraints and expected outcomes."),
+    (("solution", "proposed"), "Describe the proposed solution: overall approach, key components, and how each objective is met."),
+    (("implementation", "design", "methodolog", "architecture"), "Explain how the system works end to end: architecture, main components, workflow and key implementation decisions."),
+    (("result", "testing", "evaluation"), "Describe the testing approach and the expected behaviour of the system; do not report invented measurements."),
+    (("main text", "main body", "main content"), "Explain how the system works end to end: architecture, main components, workflow and key implementation decisions."),
+    (("conclusion", "recommend"), "Summarise the objectives addressed and the design delivered, state realistic design-level limitations (not measured results), then give 4 to 6 numbered recommendations for future work."),
+]
+
+
+def _clean_unicode(t):
+    t = t or ""
+    for k, v in _UNI_MAP.items():
+        t = t.replace(k, v)
+    return t
+
+
+def _norm_title(t):
+    t = _clean_unicode(t).strip()
+    t = _rx.sub(r"^\d+(?:\.\d+)*\.?\s*", "", t)
+    return t.strip()
+
+
+def _is_technical(title):
+    tl = (title or "").lower()
+    return any(w in tl for w in _TECH_WORDS)
+
+
+_PURPOSES_EXTRA = [
+    (("introduction",), "Introduce the project subject: the domain, the motivation and the aim of the project, in general terms."),
+    (("objective", "aim"), "State the main objectives of the project clearly, as a short numbered list or short paragraphs, in terms of design intent."),
+    (("literature", "related work", "survey"), "Review in general terms the established approaches and well-known work in this domain and their limitations. Do not cite specific papers, authors or years."),
+    (("requirement",), "Describe the functional and non-functional requirements the system is designed to meet, in general terms."),
+    (("scope", "future"), "Describe what is in and out of scope and realistic directions for future extension, without claiming anything was measured."),
+    (("learning", "outcome"), "Describe the skills and understanding gained from working on this kind of project, in general terms, without claiming specific achievements."),
+    (("company", "profile"), "Describe, in general terms, the kind of organisation or working environment in which such a project is carried out. Do not invent a company name."),
+]
+
+
+def _purpose_for(title):
+    tl = (title or "").lower()
+    for keys, text in list(_PURPOSES) + _PURPOSES_EXTRA:
+        if any(_rx.search(r"\b" + _rx.escape(k), tl) for k in keys):
+            return text
+    return "Say something specific to this title that no other section covers."
+
+
+def _facts_subset(facts, keys):
+    lines = []
+    for key in keys:
+        value = facts.get(key)
+        if not value:
+            continue
+        if isinstance(value, (list, tuple)):
+            value = ", ".join(str(v) for v in value if v)
+        value = str(value).strip()
+        if value and value.lower() not in ("not detected", "not provided", "none"):
+            lines.append(f"- {key.replace('_', ' ').title()}: {value}")
+    return "\n".join(lines) if lines else "- (limited facts)"
+
+
+def _build_prompt(title, instruction, subset, problem="", covered=None, purpose="",
+                  technical=False, is_refs=False, no_struct=False, allow_table=False):
+    parts = ["You are writing one section of a formal academic internship report, in third person, formal English.\n\n"]
+    if problem:
+        parts.append("PROJECT SUBJECT (the whole report is about this; treat it as the project title):\n" + problem + "\n\n")
+    if is_refs:
+        rules = [
+            "List 8 to 10 references, one per line, numbered '1. ', '2. ' and so on, in IEEE style (authors, title, publisher or venue, year).",
+            "Include only works you are certain exist: official documentation ONLY of technologies named in the technical facts, standard textbooks, and landmark papers of the project domain.",
+            "Do NOT invent any source. No DOIs. No URLs except the home page of official documentation.",
+            "No subheadings, no tables, no introduction sentence.",
+        ]
+    else:
+        rules = [
+            "Write about the PROJECT SUBJECT. Use well-established general knowledge of the domain plus any technical facts below.",
+            "Do NOT invent names of people, companies or institutions, dates, metrics or statistics.", "Do NOT claim that experiments, pilots, interviews, surveys, user studies or measurements were carried out, and do not report results, accuracy figures or feedback. Describe design intent, expected behaviour and general domain knowledge, using wording such as is designed to, aims to, typically.", "Describe organisations, teams and working practices only in general, typical terms, never as facts about a specific real company.",
+            "Never mention a README, missing documentation, or anything being 'not detected' or 'absent'.",
+            "Do not repeat anything listed under ALREADY COVERED. Add new information only.",
+            "Use short paragraphs of 2 to 4 sentences. Vary your opening sentences. No emoji or unicode icons.",
+        ]
+        if technical:
+            rules.append("Mention programming languages, frameworks or features only briefly and only if they add value. Never mention file names or folder names.")
+        else:
+            rules.append("Do not mention programming languages, frameworks, file names or module names in this section.")
+        if no_struct:
+            rules.append("Write plain paragraphs only: no subheadings, no tables, no lists.")
+        else:
+            rules.append("Use '## Subheading' lines only if the section is long, and never a subheading that repeats the section title. Do not repeat a subheading at the start of the next paragraph.")
+            if allow_table:
+                rules.append("Include exactly ONE markdown table with real, meaningful column names (never generic names such as Header A or Column 1): a header row, a separator row | --- | --- |, then body rows, one per line. Never HTML.")
+            else:
+                rules.append("Do not use any table in this section.")
+            rules.append("Put bullet items on their own lines starting with '- '. For recommendations use '1. ', '2. ', '3. ' on separate lines.")
+    parts.append("STRICT RULES:\n" + "\n".join(f"{i}. {r}" for i, r in enumerate(rules, 1)) + "\n\n")
+    if True:
+        parts.append(f"TECHNICAL FACTS (use only if relevant):\n{subset}\n\n")
+    if covered:
+        parts.append("ALREADY COVERED IN EARLIER SECTIONS (do not repeat):\n" + "\n".join("- " + c for c in covered) + "\n\n")
+    parts.append(f"SECTION TITLE: {title}\n")
+    if purpose:
+        parts.append(f"PURPOSE OF THIS SECTION: {purpose}\n")
+    parts.append(f"INSTRUCTIONS: {instruction}\n\n")
+    parts.append("Return ONLY the section body. No top-level title.")
+    return "".join(parts)
+
+
+def _postprocess(text, title, no_struct=False, is_refs=False, allow_table=True):
+    text = _clean_unicode(text or "")
+    _tn = _rx.sub(r"[^a-z0-9 ]", "", (title or "").lower()).strip()
+    _ls = text.split("\n")
+    while _ls and not _ls[0].strip():
+        _ls.pop(0)
+    if _ls and _rx.sub(r"[^a-z0-9 ]", "", _ls[0].lower()).strip() == _tn:
+        _ls.pop(0)
+    text = "\n".join(_ls)
+    original = text
+    lines = text.split("\n")
+    out = []
+    seen_table = False
+    tnorm = _rx.sub(r"[^a-z0-9 ]", "", (title or "").lower()).strip()
+    i = 0
+    while i < len(lines):
+        ln = lines[i]
+        st = ln.strip()
+        if st.startswith("|"):
+            j = i
+            blk = []
+            while j < len(lines) and lines[j].strip().startswith("|"):
+                blk.append(lines[j])
+                j += 1
+            hdr = [c.strip() for c in blk[0].strip().strip("|").split("|")]
+            bad = no_struct or (not allow_table) or seen_table or len(blk) < 3 or any(_PLACEHOLDER_HDR.match(c) for c in hdr)
+            if not bad:
+                out.extend(blk)
+                seen_table = True
+            else:
+                while out and not out[-1].strip():
+                    out.pop()
+                if out and out[-1].strip().endswith(":"):
+                    out.pop()
+            i = j
+            continue
+        if st.startswith("#"):
+            h = st.lstrip("#").strip()
+            hn = _rx.sub(r"[^a-z0-9 ]", "", h.lower()).strip()
+            if no_struct or st.startswith("# ") or (hn and (hn in tnorm or tnorm in hn)):
+                i += 1
+                continue
+            out.append(ln)
+            i += 1
+            continue
+        if (not is_refs) and st and not st.startswith("-") and not _rx.match(r"^\d+[.)]\s", st):
+            sents = _rx.split(r"(?<=[.!?])\s+", st)
+            keep = [x for x in sents if not _BANNED.search(x) and not _FILEREF.search(x)]
+            if not keep:
+                i += 1
+                continue
+            ln = " ".join(keep)
+        out.append(ln)
+        i += 1
+    res = _rx.sub(r"\n{3,}", "\n\n", "\n".join(out)).strip()
+    _l = res.split("\n")
+    if _l and is_refs and not _rx.search(r'[.)"]$', _l[-1].strip()):
+        _l.pop()
+        res = "\n".join(_l).strip()
+    if _l and not is_refs:
+        _last = _l[-1].strip()
+        if _last and not _last.endswith("|") and not _last.startswith("-") and not _rx.match(r"^\d+[.)]\s", _last) and not _rx.search(r'[.!?)"]$', _last):
+            _k = max(_last.rfind(". "), _last.rfind("! "), _last.rfind("? "))
+            if _k > 0:
+                _l[-1] = _last[:_k + 1]
+            else:
+                _l.pop()
+            res = "\n".join(_l).strip()
+    return res if len(res) >= 150 or is_refs else original.strip()
+
+
+def _call_ollama(prompt):
+    payload = {
+        "model": OLLAMA_MODEL,
+        "prompt": prompt,
+        "stream": False,
+        "options": {"temperature": 0.55, "num_predict": 1000, "num_ctx": 4096},
+    }
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(
+        f"{OLLAMA_URL}/api/generate",
+        data=data,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=TIMEOUT_SECONDS) as resp:
+        body = resp.read().decode("utf-8")
+    return (json.loads(body).get("response") or "").strip()
+
+
+def _call_groq(prompt):
+    """Call Groq via the official SDK with a fallback chain.
+
+    Treats responses under 200 characters as failures (likely refusals),
+    and tries the next model. Each model gets 2 attempts.
+    """
+    if not GROQ_API_KEY:
+        raise RuntimeError("GROQ_API_KEY is not set but AI_PROVIDER=groq")
+
+    from groq import Groq
+
+    client = Groq(api_key=GROQ_API_KEY, timeout=TIMEOUT_SECONDS)
+
+    models_to_try = [
+        GROQ_MODEL,
+        "openai/gpt-oss-120b",
+        "qwen/qwen3.8-27b",
+        "groq/compound-mini",
+        "groq/compound",
+    ]
+
+    system_prompt = (
+        "You are a professional academic writer. "
+        "You write formal, structured internship report sections. "
+        "Structure long sections with '## Subheading' lines. "
+        "Include markdown tables (| col | col |) where useful. "
+        "Break long text into 2-4 sentence paragraphs. "
+        "Always produce the full requested word count. "
+        "Never refuse a writing task. "
+        "Never output apologies or disclaimers. "
+        "Never use emoji, pin symbols (like the pushpin icon), or any unicode icon. "
+        "Never repeat the subheading text at the start of a paragraph."
+    )
+
+    for model_name in models_to_try:
+        for attempt in range(2):
+            try:
+                response = client.chat.completions.create(
+                    model=model_name,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": prompt},
+                    ],
+                    temperature=0.6 + (0.1 * attempt),
+                    max_tokens=1200,
+                )
+                if response.choices:
+                    content = (response.choices[0].message.content or "").strip()
+                    if len(content) >= 200:
+                        return content
+            except Exception:
+                continue
+
+    return ""
+
+
+def _call_ai(prompt):
+    if AI_PROVIDER == "groq":
+        return _call_groq(prompt)
+    return _call_ollama(prompt)
+
+
+def _specs_from_headings(headings):
+    """Build SECTION_SPECS-like list from extracted headings."""
+    if not headings or len(headings) < 3:
+        return None
+
+    out = []
+    # ALWAYS produce Acknowledgement + Abstract (regardless of sample)
+    out.append({
+        "title": "Acknowledgement",
+        "focus_keys": ["project_name"],
+        "instruction": ("Write 150-200 words of formal academic acknowledgement. "
+                        "Thank the academic institution, project guide, and collaborators "
+                        "generically. Do not invent specific names. Warm, professional tone."),
+    })
+    out.append({
+        "title": "Abstract",
+        "focus_keys": ["project_name", "project_type", "readme_summary",
+                       "languages", "frameworks", "features"],
+        "instruction": ("Write 220-280 words of formal academic abstract. Cover what the "
+                        "project is, the problem it solves, technologies used, what it "
+                        "produces, and the main outcome."),
+    })
+    titles_lower = " ".join((h.get("title") or "").lower() for h in headings)
+    for h in headings:
+        title = (h.get("title") or "").strip()
+        _tlo = title.lower()
+        if any(k in _tlo for k in ("acknowledg", "abstract")):
+            continue
+        import re as _re
+        # Detect subheading: number like 5.1 or 5.1.1
+        is_sub = bool(_re.match(r"^\d+\.\d+", title))
+        # Strip ANY leading number
+        clean = _re.sub(r"^\d+(?:\.\d+)*\.?\s*", "", title).strip()
+        if not clean:
+            clean = title
+
+        # Unconditionally skip ML/Flask chapters (tool is for code projects)
+        BLACKLIST = (
+            "flask backend", "flask web application", "machine learning model",
+            "random forest", "decision tree", "k-nearest", "knn",
+            "xgboost", "prediction output", "dataset description",
+            "data preprocessing", "exploratory data analysis",
+            "model evaluation", "model development",
+        )
+        clean_lower = clean.lower()
+
+        out.append({
+            "title": clean,
+            "level": 2 if is_sub else 1,
+            "focus_keys": ["project_name", "project_type", "readme_summary",
+                           "languages", "frameworks", "libraries",
+                           "frontend", "backend", "database",
+                           "apis", "modules", "features",
+                           "entry_points", "tests", "important_files"],
+            "instruction": (
+                f"Write a detailed section titled '{clean}'. "
+                "Base it only on the project facts provided. "
+                "Use 2-4 short paragraphs. If helpful, include one "
+                "markdown table (| Column | Column |) or a [FIGURE: caption] "
+                "line. Do not repeat the heading at the start of the paragraph."
+            ),
+        })
+    return out
+
+
+_SUPPORT_MAP = [
+    (("decision tree",), ("decision tree","decisiontree")),
+    (("random forest",), ("random forest","randomforest")),
+    (("k nearest","knn"), ("kneighbors","knn","nearest neighbor","nearest neighbour")),
+    (("xgboost",), ("xgboost",)),
+    (("support vector","svm"), ("svm","svc","support vector")),
+    (("neural network","cnn","deep learning"), ("tensorflow","keras","torch","neural")),
+    (("flask",), ("flask",)),
+    (("django",), ("django",)),
+    (("react",), ("react",)),
+    (("angular",), ("angular",)),
+    (("dataset", "data preprocessing", "exploratory", "model development", "model training", "model evaluation", "machine learning", "prediction"),
+     ("sklearn", "scikit", "pandas", "tensorflow", "keras", "torch", "xgboost", "joblib", "dataset", "machine learning")),
+]
+
+
+def _roman_fix(text):
+    """ROMAN_FIX_APPLY: fix '1 would like' -> 'I would like'."""
+    import re as _re
+    # After sentence break or start
+    text = _re.sub(r"(^|[.!?]\s+)1\s+(would|am|have|had|will|was|wish|extend|express|sincerely|thank|acknowledge)", r"\1I \2", text)
+    # Anywhere else: " 1 " at start of a word followed by verb
+    text = _re.sub(r"\b1\s+(would|am|have|had|wish|extend|express|acknowledge)", r"I \1", text)
+    return text
+
+
+LEN_SCALE = 1.0
+
+
+def generate_sections(facts, progress=None, custom_headings=None):
+    specs_to_use = _specs_from_headings(custom_headings) if custom_headings else None
+    if not specs_to_use:
+        specs_to_use = SECTION_SPECS
+        print("[AI] Using default SECTION_SPECS", flush=True)
+    else:
+        print(f"[AI] Using {len(specs_to_use)} custom headings from sample PDF", flush=True)
+    specs_to_use = list(specs_to_use)
+    if not any(("reference" in (sp["title"] or "").lower() or "bibliograph" in (sp["title"] or "").lower()) for sp in specs_to_use):
+        specs_to_use.append({"title": "References", "focus_keys": ["languages", "frameworks", "libraries"],
+                             "instruction": "List the references for this report."})
+        print("[AI] Added References chapter", flush=True)
+    problem = _clean_unicode(str(facts.get("problem_statement") or "")).strip()
+    print(f"[AI] problem statement used: {problem[:100]!r}", flush=True)
+    out, covered = [], []
+    for i, spec in enumerate(specs_to_use, start=1):
+        title = _norm_title(spec["title"]) or spec["title"]
+        tl = title.lower()
+        is_refs = ("reference" in tl) or ("bibliograph" in tl)
+        no_struct = is_refs or ("abstract" in tl) or ("acknowledg" in tl)
+        technical = _is_technical(title)
+        allow_table = any(k in tl for k in ("plan", "schedule", "program"))
+        if progress:
+            progress(f"[{i}/{len(specs_to_use)}] {title}...")
+        keys = list(spec["focus_keys"]) if (technical or is_refs or not problem) else []
+        if problem:
+            keys = [k for k in keys if k != "project_name"]
+        subset = _facts_subset(facts, keys) if keys else "- (none; rely on the project subject and general domain knowledge)"
+        instr = spec["instruction"]
+        if instr.startswith("Write a detailed section titled"):
+            instr = (f"Write a detailed section titled '{title}' of 3 to 5 short paragraphs "
+                     "(about 250 to 350 words). Say something specific to this title that no other section covers.")
+        import re as _re2
+        _sc = LEN_SCALE
+        if _sc < 0.999:
+            instr = _re2.sub(r"(\d+)\s*(?:-|to)\s*(\d+)(\s*words)", lambda m: "%d to %d%s" % (max(30, int(int(m.group(1)) * _sc)), max(40, int(int(m.group(2)) * _sc)), m.group(3)), instr)
+        _purp = _purpose_for(title)
+        if _purp.startswith("Say something") and not is_refs and not no_struct:
+            _tpad = " " + tl.replace("-", " ")
+            _blob = " ".join(str(v) for k, v in facts.items() if k != "problem_statement").lower()
+            _rule = None
+            for _tk, _ev in _SUPPORT_MAP:
+                if any((" " + k) in _tpad for k in _tk):
+                    _rule = _ev
+                    break
+            if _rule is not None:
+                if any(e in _blob for e in _rule):
+                    _purp = "Describe how this part is realised in the project, using the technical facts. Do not invent details."
+                    technical = True
+                    subset = _facts_subset(facts, ["languages", "frameworks", "libraries", "backend", "frontend", "database", "modules", "features"])
+                    print("[AI] support " + title + ": SUPPORTED by facts", flush=True)
+                else:
+                    _purp = "The project does not contain this component. Write only about the general role and good practice of this topic in the project domain, in general terms. Do not state or imply that this project implements it."
+                    technical = False
+                    subset = "- (none; rely on the project subject and general domain knowledge)"
+                    print("[AI] support " + title + ": NOT in facts, general wording", flush=True)
+        prompt = _build_prompt(title, instr, subset, problem, covered[-8:], _purp,
+                               technical, is_refs, no_struct, allow_table)
+        _min = 700 if "abstract" in tl else (700 if is_refs else (150 if "acknowledg" in tl else 900))
+        _min = max(120, int(_min * LEN_SCALE))
+        best = ""
+        for _try in range(3):
+            try:
+                raw = _call_ai(prompt)
+            except Exception as exc:
+                raw = ""
+                print(f"[AI] call failed ({title}): {exc}", flush=True)
+            if raw and raw.startswith("[AI"):
+                raw = ""
+            cand = _postprocess(_roman_fix(raw), title, no_struct, is_refs, allow_table) if raw else ""
+            print(f"[AI] {title}: raw={len(raw)} processed={len(cand)} try={_try + 1}", flush=True)
+            if len(cand) > len(best):
+                best = cand
+            if len(best) >= _min:
+                break
+        content = best or "Content for this section could not be generated."
+        print(f"[DBG-RAW] {title} :: {content[:400]!r}", flush=True)
+        out.append({"title": title, "content": content, "level": spec.get("level", 1)})
+        if not no_struct:
+            for ln in content.split("\n"):
+                t = ln.strip()
+                if t and not t.startswith(("#", "|", "-")):
+                    covered.append(f"{title}: {t[:150]}")
+                    break
+        if progress:
+            progress(f"    -> {len(content)} chars")
+    return out

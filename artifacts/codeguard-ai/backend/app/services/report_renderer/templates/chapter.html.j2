@@ -1,0 +1,26 @@
+{% for ch in ctx.chapters %}
+<section class="page chapter" style="page-break-before: always; margin-top:0; padding-top:0;">
+  <h1 style="font-size:22pt; font-weight:bold; border-bottom:2px solid #222; padding-bottom:8px; margin-top:0; margin-bottom:20px;">{{ ch.heading | replace('##', '') | replace('#', '') }}</h1>
+  {% for block in ch.blocks %}
+    {% if block.type == "h2" %}
+      <h2 style="font-size:14pt; font-weight:bold; margin-top:20px; margin-bottom:10px;">{{ block.text | replace('##', '') | replace('#', '') }}</h2>
+    {% elif block.type == "p" %}
+      <p style="text-align:justify; line-height:1.6; margin-bottom:12px;">{{ block.text | replace('##', '') | replace('#', '') }}</p>
+    {% elif block.type == "ol" %}
+      <ol style="margin-left:20px; margin-bottom:15px;">{% for item in block.items %}<li>{{ item }}</li>{% endfor %}</ol>
+    {% elif block.type == "ul" %}
+      <ul style="margin-left:20px; margin-bottom:15px;">{% for item in block.items %}<li>{{ item }}</li>{% endfor %}</ul>
+    {% elif block.type == "table" %}
+      <table border="1" style="border-collapse:collapse; width:100%; margin-bottom:15px;">
+        <tr>{% for c in block.items[0] %}<th style="padding:8px; text-align:left;">{{ c }}</th>{% endfor %}</tr>
+        {% for row in block.items[1:] %}<tr>{% for c in row %}<td style="padding:8px;">{{ c }}</td>{% endfor %}</tr>{% endfor %}
+      </table>
+    {% elif block.type == "figure" %}
+      <div style="text-align:center; margin:20px 0;">
+        <img src="{{ block.image_uri }}" style="max-width:100%;">
+        <p style="font-style:italic; font-size:10pt;">{{ block.text }}</p>
+      </div>
+    {% endif %}
+  {% endfor %}
+</section>
+{% endfor %}

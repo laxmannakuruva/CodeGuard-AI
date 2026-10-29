@@ -1,0 +1,16 @@
+﻿<section class="page toc" id="anchor-toc">
+  <h1>Table of Contents</h1>
+  <div class="rule"></div>
+  <div class="toc-body">
+    {% for ch in ctx.chapters %}
+    <div class="toc-row">
+      <span class="toc-num">{{ loop.index }}</span>
+      <span class="toc-title">{{ ch.heading }}</span>
+    </div>
+    {% endfor %}
+    <div class="toc-row">
+      <span class="toc-num">{{ ctx.chapters|length + 1 }}</span>
+      <span class="toc-title">References</span>
+    </div>
+  </div>
+</section>

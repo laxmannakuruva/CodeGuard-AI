@@ -1,0 +1,14 @@
+<section class="page front" style="page-break-before: always;">
+  <h1 style="font-size:22pt; font-weight:bold; border-bottom:2px solid #222; padding-bottom:8px; margin-bottom:20px;">{{ ctx.chapters|length + 1 }}. References</h1>
+  {% if ctx.references_section and ctx.references_section.blocks %}
+    {% for block in ctx.references_section.blocks %}
+      {% if block.items %}
+        {% for item in block.items %}<div style="margin-bottom:8px; line-height:1.6; font-size:12pt;">{{ item }}</div>{% endfor %}
+      {% elif block.text %}
+        <div style="margin-bottom:8px; line-height:1.6; font-size:12pt; white-space: pre-wrap;">{{ block.text }}</div>
+      {% endif %}
+    {% endfor %}
+  {% else %}
+    <p>References not generated.</p>
+  {% endif %}
+</section>
