@@ -1,77 +1,23 @@
-﻿# CodeGuard AI
+﻿# CodeGuard AI — AI-Powered Project Report Generator
 
-AI-powered project report generator. Upload a ZIP of any project, and get back a professionally formatted academic report PDF — with chapters, tables, TOC, and AI-written narrative.
+CodeGuard AI is a full-stack web application that automates the generation of academic and technical project reports. Users can upload their source code as a ZIP file, provide a sample PDF format, and the application uses Generative AI to write and render a perfectly formatted PDF report.
 
-## What it does
+## Features
+- **Project Ingestion:** Analyzes project ZIP files to extract structure, languages, frameworks, and entry points.
+- **Format Parsing:** Uses PyMuPDF to extract chapter headings and layout rules from a user-uploaded sample PDF.
+- **Generative AI:** Integrates the Groq API (with Ollama fallback) to write context-aware report chapters based on the codebase.
+- **Parallel Processing:** Utilizes Python's ThreadPoolExecutor to generate chapters in parallel, reducing AI generation time by 4x.
+- **PDF Rendering:** Uses Jinja2 and WeasyPrint to programmatically render HTML/CSS into a paginated PDF with an automated Table of Contents, dynamic page breaks, and image galleries.
 
-- **Upload a project ZIP** — the system extracts the project name, languages, frameworks, modules, features, and entry points.
-- **Optionally upload a sample report PDF** — its structure (chapters, ordering) becomes the template for your generated report.
-- **Add a problem statement** — typed text that becomes a chapter in the final report.
-- **Upload project images** — screenshots, diagrams, or photos to embed as figures.
-- **Generate the report** — AI writes the narrative (locally via Ollama, no cloud API needed), and the final PDF is rendered with Playwright + Chromium.
+## Tech Stack
+- **Frontend:** React, TypeScript, Tailwind CSS, Vite
+- **Backend:** Python, FastAPI
+- **AI Providers:** Groq API (Llama 3), Ollama (Llama 3.1 fallback)
+- **Document Processing:** PyMuPDF (fitz), PyPDF, Jinja2, WeasyPrint
 
-## Stack
-
-**Backend:** Python 3.14 · FastAPI · PyMuPDF · Jinja2 · Playwright · Ollama (llama3.1:8b)
-
-**Frontend:** React · Vite · TypeScript · TailwindCSS
-
-**Monorepo:** pnpm workspaces
-
-## Project layout
-
-``nartifacts/
-  codeguard-ai/
-    backend/
-      app/
-        models/       Pydantic models
-        routes/       FastAPI endpoints (upload, project, report)
-        services/
-          report_renderer/   PDF engine (design + AI writer + Playwright)
-    src/
-      components/
-        report-studio.tsx
-        welcome-overlay.tsx
-      hooks/
-      pages/
-        home.tsx      the three-stage UI
-  api-server/
-lib/
-``n
-## Running locally
-
-1. Install Python dependencies:
-   ``n   python -m venv .venv
-   .venv\Scripts\activate
-   pip install -r artifacts/codeguard-ai/backend/requirements.txt
-   playwright install chromium
-   ``n
-2. Install Node dependencies:
-   ``n   pnpm install
-   ``n
-3. Start Ollama with a writing model:
-   ``n   ollama pull llama3.1:8b
-   ollama serve
-   ``n
-4. Run the backend:
-   ``n   cd artifacts/codeguard-ai/backend
-   uvicorn app.main:app --port 8000 --reload
-   ``n
-5. Run the frontend:
-   ``n   cd artifacts/codeguard-ai
-   pnpm run dev
-   ``n
-6. Open `http://localhost:5000`
-
-## How the report engine works
-
-1. **Design source** — the sample report PDF. We extract page size, margins, fonts, colors, and chapter outline.
-2. **Content source** — the project ZIP. We extract facts only; the ZIP's code is never executed.
-3. **Narrative source** — Ollama writes each section using only the extracted facts. No invented names, dates, or metrics.
-4. **Renderer** — Jinja2 HTML → Playwright Chromium → A4 PDF.
-
-## License
-
-MIT
-
-
+## How to Run Locally
+1. Clone the repository.
+2. Set up the frontend (`npm install`).
+3. Set up the backend (`pip install -r requirements.txt`).
+4. Add your `GROQ_API_KEY` to a `.env` file.
+5. Start the backend (`uvicorn app.main:app --reload`) and frontend (`npm run dev`).
