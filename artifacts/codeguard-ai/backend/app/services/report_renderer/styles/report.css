@@ -375,3 +375,14 @@ html, body, p, li, td, th, h1, h2, h3, figcaption, .toc, .tocx-row, .tocx-row a 
 .page.chapter { page-break-after: auto; }
 .page.chapter + .page.chapter { margin-top: 18pt; }
 
+
+
+/* ===== TOC FINAL V3 ===== */
+.toc-list li a.toc-entry::after {
+  content: leader('.') target-counter(attr(href), page) !important;
+  float: none !important;
+}
+table.data, table.data tr, table.data td, table.data th {
+  page-break-inside: auto !important;
+  break-inside: auto !important;
+}
