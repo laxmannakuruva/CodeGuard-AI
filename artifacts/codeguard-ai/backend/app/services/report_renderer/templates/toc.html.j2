@@ -1,16 +1,22 @@
-<section class="page toc">
-  <h1 style="font-size:22pt; font-weight:bold; margin-bottom:20px;">Table of Contents</h1>
-  <div style="border-top:3px solid #222; margin-bottom:20px;"></div>
-  <div style="width:100%; font-size:14pt; line-height:1.6;">
+<section class="page front" id="anchor-toc">
+  <h1>Table of Contents</h1>
+  <div class="rule"></div>
+  <ul class="toc-list">
+    {% if ctx.acknowledgement %}
+      <li><a class="toc-entry" href="#anchor-ack">Acknowledgement</a></li>
+    {% endif %}
+    {% if ctx.abstract %}
+      <li><a class="toc-entry" href="#anchor-abstract">Abstract</a></li>
+    {% endif %}
     {% for ch in ctx.chapters %}
-    <div style="display:block; margin-bottom:12px; page-break-inside:avoid;">
-      <span style="display:inline-block; width:40px; font-weight:bold;">{{ loop.index }}.</span>
-      <span style="display:inline;">{{ ch.title | replace('##', '') | replace('#', '') }}</span>
-    </div>
+      <li><a class="toc-entry" href="#anchor-chapter-{{ loop.index }}">{{ ch.heading }}</a></li>
     {% endfor %}
-    <div style="display:block; margin-bottom:12px; page-break-inside:avoid;">
-      <span style="display:inline-block; width:40px; font-weight:bold;">{{ ctx.chapters|length + 1 }}.</span>
-      <span style="display:inline;">References</span>
-    </div>
-  </div>
+    {% if ctx.gallery_images %}
+      <li><a class="toc-entry" href="#anchor-gallery">Project Image Gallery</a></li>
+    {% endif %}
+    {% if ctx.has_appendices %}
+      <li><a class="toc-entry" href="#anchor-appendices">Appendices</a></li>
+    {% endif %}
+    <li><a class="toc-entry" href="#anchor-references">References</a></li>
+  </ul>
 </section>
