@@ -152,14 +152,6 @@ def _cache_key(sections, extra=""):
 
 
 def _load_cache(project_root, key):
-    if not project_root:
-        return None
-    f = Path(__file__).parent / ".ai_cache" / f"{key}.json"
-    if f.exists():
-        try:
-            return _json.loads(f.read_text(encoding="utf-8"))
-        except Exception:
-            return None
     return None
 
 
@@ -291,7 +283,7 @@ def _ai_to_chapters(ai_sections):
     import re as _renum
     for i, ch in enumerate(chapters, 1):
         if _renum.match(r"^\d+", ch.title):
-            ch.heading = ch.title
+            ch.heading = ch.title.lstrip("# ").strip()
         else:
             ch.heading = f"{i}. {ch.title}"
     import re as _rn2
