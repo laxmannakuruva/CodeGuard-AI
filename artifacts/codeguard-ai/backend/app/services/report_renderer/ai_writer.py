@@ -1,4 +1,4 @@
-"""AI report writer - supports Ollama (local) and Groq (cloud)."""
+﻿"""AI report writer - supports Ollama (local) and Groq (cloud)."""
 
 import sys as _sys
 try:
@@ -539,19 +539,15 @@ def generate_sections(facts, progress=None, custom_headings=None):
         if not content:
             content = "[AI returned empty content]"
         content = _roman_fix(content)
-        if progress:
-            progress(f"    -> {len(content)} chars")
-        return {"title": title, "content": content, "level": spec.get("level", 1)}
-
-    out = [None] * len(specs_to_use)
-    
-    # Run 4 chapters at the same time
-    with ThreadPoolExecutor(max_workers=4) as executor:
-        results = list(executor.map(_process_section, enumerate(specs_to_use, start=1)))
-        
-    for res in results:
-        if res:
-            out.append(res)
+        import re as _rurl
+        content = _rurl.sub(r"https?://[^\s\)\]\},;]+", "", content)
+        content = _rurl.sub(r"[ \t]{2,}", " ", content)
+        content = _rurl.sub(r"^#+\s+", "", content, flags=_rurl.MULTILINE)
+        content = _rurl.sub(r"^\s*The section titled .*?(?:\n\s*\n|\Z)", "", content, flags=_rurl.DOTALL | _rurl.IGNORECASE).lstrip()
+        if not content.strip():
+            content = "This section could not be generated. Please try again."
+        out.append(res)
             
     # Filter out Nones just in case
     return [x for x in out if x is not None]
+
